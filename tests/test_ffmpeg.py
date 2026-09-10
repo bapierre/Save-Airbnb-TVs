@@ -56,6 +56,11 @@ class TestArgv(unittest.TestCase):
         argv = ff.build_argv("ffmpeg", inputs, ff.VideoSpec(), True)
         self.assertNotIn("-nostdin", argv)  # stdin carries the video
 
+    def test_rawpipe_inputs_skip_probing(self):
+        inputs = ff.rawpipe_inputs(1280, 832, 30, "/tmp/a.fifo")
+        self.assertEqual(inputs.count("-analyzeduration"), 2)
+        self.assertLess(inputs.index("-probesize"), inputs.index("pipe:0"))
+
     def test_rawpipe_without_audio(self):
         inputs = ff.rawpipe_inputs(1280, 832, 30, None)
         self.assertNotIn("f32le", inputs)

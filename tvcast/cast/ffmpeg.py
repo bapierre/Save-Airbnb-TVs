@@ -78,12 +78,18 @@ def avfoundation_inputs(screen, audio, fps):
             "-i", f"{screen}:{audio if audio is not None else 'none'}"]
 
 
+# Raw inputs need no format analysis. Without these, ffmpeg sits on the PCM input for
+# several seconds "estimating" it, and the TV gives up waiting for the first byte.
+NO_PROBE = ["-probesize", "32", "-analyzeduration", "0", "-fflags", "nobuffer"]
+
+
 def rawpipe_inputs(width, height, fps, audio_fifo):
     """NV12 frames on stdin (from the ScreenCaptureKit helper) plus float PCM on a fifo."""
-    args = ["-f", "rawvideo", "-pix_fmt", "nv12", "-video_size", f"{width}x{height}",
-            "-framerate", str(fps), "-i", "pipe:0"]
+    args = NO_PROBE + ["-f", "rawvideo", "-pix_fmt", "nv12", "-video_size", f"{width}x{height}",
+                       "-framerate", str(fps), "-thread_queue_size", "64", "-i", "pipe:0"]
     if audio_fifo:
-        args += ["-f", "f32le", "-ar", "48000", "-ac", "2", "-i", audio_fifo]
+        args += NO_PROBE + ["-f", "f32le", "-ar", "48000", "-ac", "2",
+                            "-thread_queue_size", "1024", "-i", audio_fifo]
     return args
 
 
