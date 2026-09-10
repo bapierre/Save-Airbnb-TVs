@@ -8,6 +8,7 @@ import sys
 
 from . import hosts as hostmod
 from . import mdns
+from . import report as reportmod
 from . import ssdp
 from . import verdict as verdictmod
 from . import wifi
@@ -32,7 +33,7 @@ def log(msg, quiet=False):
 
 def gather(args):
     color = not args.no_color and sys.stdout.isatty()
-    quiet = args.json
+    quiet = args.json or args.report
 
     # 1. Which subnet are we on
     networks = hostmod.local_networks()
@@ -244,12 +245,16 @@ def main(argv=None):
     p.add_argument("--no-wifi", action="store_true",
                    help="skip the Wi-Fi Direct scan (it is slow on macOS)")
     p.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    p.add_argument("--report", action="store_true",
+                   help="emit sanitized JSON for a TV report (no full MACs, no own addresses)")
     p.add_argument("--no-color", action="store_true")
     args = p.parse_args(argv)
 
     report, color = gather(args)
 
-    if args.json:
+    if args.report:
+        print(json.dumps(reportmod.redact(report), indent=2, default=list))
+    elif args.json:
         print(json.dumps(report, indent=2, default=list))
     else:
         render(report, color)
