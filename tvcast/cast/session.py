@@ -64,6 +64,7 @@ class Session:
         self.launcher, self.server, self.url, self.log = launcher, server, url, log
         self.stop_event, self.sleep, self.clock = stop_event, sleep, clock
         self.poll = poll_interval
+        self.start_retries = 2  # TVs in standby or a screensaver need a remote press first
 
     def run(self):
         """Returns the process exit code."""
@@ -76,6 +77,7 @@ class Session:
             return 1
         code = 0
         last = None
+        retries_left = self.start_retries
         while not self.stop_event.is_set():
             self.sleep(self.poll)
             if self.stop_event.is_set():
@@ -86,6 +88,17 @@ class Session:
                 last = state
             action = watcher.tick(state, self.clock())
             if action == "timeout":
+                if retries_left > 0:
+                    retries_left -= 1
+                    self.log(f"TV did not start playing. If it is asleep or on a screensaver, "
+                             f"press a button on its remote. Retrying ({self.start_retries - retries_left}"
+                             f"/{self.start_retries})…")
+                    watcher = Watcher()
+                    try:
+                        self.launcher.play(self.url)
+                    except UpnpError as e:
+                        self.log(f"retry failed: {e}")
+                    continue
                 self._explain_timeout(state)
                 code = 1
                 break

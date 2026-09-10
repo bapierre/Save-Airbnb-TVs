@@ -131,6 +131,30 @@ class TestSession(unittest.TestCase):
         self.assertEqual(s.run(), 1)
         self.assertTrue(any("HEAD, GET" in m for m in logs))
 
+    def test_start_timeout_retries_before_giving_up(self):
+        launcher = FakeLauncher(["STOPPED"])
+        logs = []
+        s = self.make(launcher, FakeServer(), threading.Event(), clock_step=5, logs=logs)
+        s.start_retries = 2
+        self.assertEqual(s.run(), 1)
+        plays = [c for c in launcher.calls if c[0] == "play"]
+        self.assertEqual(len(plays), 3)  # initial + 2 retries
+        self.assertTrue(any("remote" in m for m in logs))
+
+    def test_retry_succeeds_when_tv_wakes_up(self):
+        launcher = FakeLauncher(["STOPPED", "STOPPED", "STOPPED", "STOPPED", "PLAYING"])
+        stop = threading.Event()
+        polls = []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) >= 8:
+                stop.set()
+
+        s = self.make(launcher, FakeServer(), stop, clock_step=5, sleep=sleep)
+        s.start_retries = 2
+        self.assertEqual(s.run(), 0)
+
     def test_play_failure_exits_1(self):
         launcher = FakeLauncher(["STOPPED"], fail_play=True)
         logs = []
