@@ -4,7 +4,7 @@ import signal
 import sys
 import threading
 
-from . import capture, discovery, ffmpeg as ff, sckcap
+from . import capture, discovery, ffmpeg as ff, macaudio, sckcap
 from .launcher import DlnaLauncher
 from .server import StreamServer
 from .session import SelectionError, Session, select_target
@@ -45,6 +45,8 @@ def main(argv=None):
     p.add_argument("--bitrate", default="4M")
     p.add_argument("--port", type=int, default=8090)
     p.add_argument("--timeout", type=float, default=4.0, help="SSDP discovery seconds")
+    p.add_argument("--keep-mac-audio", action="store_true",
+                   help="do not mute the Mac's speakers while the TV plays the sound")
     p.add_argument("--list-devices", action="store_true", help="show capture devices and exit")
     args = p.parse_args(argv)
 
@@ -76,11 +78,13 @@ def main(argv=None):
     w, h = QUALITY[args.quality]
     spec = ff.VideoSpec(width=w, height=h, fps=args.fps, bitrate=args.bitrate)
     factory = None
+    streaming_audio = False
     if args.audio in ("auto", "sck"):
         helper = sckcap.ensure_helper(log)
         if helper:
             size = sckcap.fit_size(*sckcap.display_size(), w, h)
             factory = capture.make_sck_factory(ffmpeg, helper, spec, size)
+            streaming_audio = True
         elif args.audio == "sck":
             log("the ScreenCaptureKit helper could not be built; see the messages above")
             return 2
@@ -88,6 +92,7 @@ def main(argv=None):
         audio_idx, audio_desc = choose_audio(args, devices)
         log(f"→ {audio_desc}")
         factory = capture.make_avfoundation_factory(ffmpeg, screen, audio_idx, spec)
+        streaming_audio = audio_idx is not None
     log(f"→ capture: {factory.description}")
 
     server = StreamServer(factory, port=args.port, log=lambda m: log(f"  http: {m}"))
@@ -104,7 +109,8 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     log("→ asking the TV to play (Ctrl-C to stop)")
     session = Session(DlnaLauncher(target.control_url), server, url, log, stop)
-    return session.run()
+    with macaudio.MutedWhileCasting(enabled=streaming_audio and not args.keep_mac_audio, log=log):
+        return session.run()
 
 
 if __name__ == "__main__":

@@ -56,8 +56,12 @@ tvcast --to 192.168.1.42        # several TVs, or discovery is flaky
 tvcast --quality 1080p          # default is 720p
 tvcast --audio none             # video only
 tvcast --audio "BlackHole"      # use a loopback audio device instead of the helper
+tvcast --keep-mac-audio         # do not mute the Mac's speakers while casting
 tvcast --list-devices           # show what ffmpeg can capture
 ```
+
+While sound is streaming to the TV, tvcast mutes the Mac's own speakers so the show does
+not play twice a few seconds apart, and unmutes them when you stop.
 
 Expect two to three seconds of delay between your screen and the TV. That is fine for
 shows and useless for games.
@@ -134,7 +138,7 @@ tvprobe --no-wifi              # skip the Wi-Fi Direct scan (slow on macOS)
 
 | TV | Platform | Transport | Result |
 |---|---|---|---|
-| "Weier" no-name set, HiSilicon Hi3751V350 | Android 9, stagefright player | DLNA | Works. About 2 s latency. Only speaks DLNA (no ADB, Cast or DIAL). |
+| "Weier" no-name set, HiSilicon Hi3751V350 | Android 9, stagefright player | DLNA | Works with sound. About 2 s latency. Only speaks DLNA (no ADB, Cast or DIAL). Its player gives up if the first byte takes more than a second or two. |
 
 Add yours with a pull request.
 
