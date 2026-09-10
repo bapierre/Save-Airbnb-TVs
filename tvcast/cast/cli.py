@@ -4,7 +4,7 @@ import signal
 import sys
 import threading
 
-from . import capture, discovery, ffmpeg as ff
+from . import capture, discovery, ffmpeg as ff, sckcap
 from .launcher import DlnaLauncher
 from .server import StreamServer
 from .session import SelectionError, Session, select_target
@@ -24,8 +24,9 @@ def choose_audio(args, devices):
         idx = ff.find_audio_device(devices, "blackhole")
         if idx is not None:
             return idx, f"audio from BlackHole device {idx}"
-        return None, ("video only: no BlackHole audio device found. Install one with "
-                      "`brew install blackhole-2ch` and set it as the output, or use --audio NAME")
+        return None, ("video only: the ScreenCaptureKit helper is unavailable and no BlackHole "
+                      "device exists. Run `xcode-select --install` for the helper, or install "
+                      "BlackHole (`brew install blackhole-2ch`), or use --audio NAME")
     idx = ff.find_audio_device(devices, args.audio)
     if idx is None:
         names = ", ".join(n for _, n in devices["audio"]) or "none"
@@ -37,7 +38,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="tvcast", description=__doc__)
     p.add_argument("--to", metavar="IP", help="TV address (skip auto-pick)")
     p.add_argument("--audio", default="auto",
-                   help="auto | none | substring of an audio device name (default auto)")
+                   help="auto | sck | none | substring of an audio device name (default auto: "
+                        "the ScreenCaptureKit helper, else BlackHole, else video only)")
     p.add_argument("--quality", choices=sorted(QUALITY), default="720p")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--bitrate", default="4M")
@@ -71,11 +73,22 @@ def main(argv=None):
         return 1
     log(f"→ target: {target.name} at {target.ip}")
 
-    audio_idx, audio_desc = choose_audio(args, devices)
-    log(f"→ {audio_desc}")
     w, h = QUALITY[args.quality]
     spec = ff.VideoSpec(width=w, height=h, fps=args.fps, bitrate=args.bitrate)
-    factory = capture.make_avfoundation_factory(ffmpeg, screen, audio_idx, spec)
+    factory = None
+    if args.audio in ("auto", "sck"):
+        helper = sckcap.ensure_helper(log)
+        if helper:
+            size = sckcap.fit_size(*sckcap.display_size(), w, h)
+            factory = capture.make_sck_factory(ffmpeg, helper, spec, size)
+        elif args.audio == "sck":
+            log("the ScreenCaptureKit helper could not be built; see the messages above")
+            return 2
+    if factory is None:
+        audio_idx, audio_desc = choose_audio(args, devices)
+        log(f"→ {audio_desc}")
+        factory = capture.make_avfoundation_factory(ffmpeg, screen, audio_idx, spec)
+    log(f"→ capture: {factory.description}")
 
     server = StreamServer(factory, port=args.port, log=lambda m: log(f"  http: {m}"))
     try:
