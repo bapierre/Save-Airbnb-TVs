@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Is my TV worth trying?
+    url: https://github.com/bapierre/Save-Airbnb-TVs/discussions
+    about: Paste your tvprobe --report output in a discussion and we will point you at the right path.

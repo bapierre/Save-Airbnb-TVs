@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        python: ["3.9", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests (no network, no ffmpeg)
+        run: python3 -m unittest discover -s tests -t . -v
+      - name: Privacy scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Full MACs are not allowed anywhere except the fictional fixtures below.
+          if git grep -nE '([0-9a-f]{2}:){5}[0-9a-f]{2}' -- . ':!.github/workflows/tests.yml' \
+             | grep -vE '00:11:22:33:44:55|3c:5a:b4:aa:bb:cc|ff:ff:ff:ff:ff:ff|01:00:5e|xx:xx:xx|00:11:22:33:44'; then
+            echo "::error::full MAC address found; mask it as aa:bb:cc:xx:xx:xx"; exit 1
+          fi
+          if git grep -nE '/Users/[a-z]' -- . ':!.github/workflows/tests.yml'; then
+            echo "::error::home directory path found"; exit 1
+          fi
+  swift-helper:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the ScreenCaptureKit helper
+        run: swiftc -O -o /tmp/sckcap tvcast/helpers/sckcap/main.swift

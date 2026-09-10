@@ -1,0 +1,106 @@
+name: TV report
+description: Report a TV you tried, whether it worked or not. This is the most useful thing you can send.
+title: "[TV] <brand> <model>: <worked / partly / failed>"
+labels: ["tv-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Reports are how this project grows. Every required field matters: a report we cannot reproduce cannot be turned into support in `tvcast`.
+        **Privacy:** paste `tvprobe --report`, never `tvprobe --json`. No Wi-Fi names, no full MAC addresses, no hostnames.
+  - type: input
+    id: model
+    attributes:
+      label: Brand and model
+      description: As printed on the back label or in Settings > About.
+      placeholder: Samsung UE43NU7100
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and version
+      description: Android TV 9 / Tizen 4.0 / webOS 5 / Roku OS 12 / Fire OS 7 / Linux no-name. Say where you found it.
+    validations:
+      required: true
+  - type: dropdown
+    id: builtin
+    attributes:
+      label: What casting does the TV advertise itself?
+      options:
+        - Miracast / "screen mirroring"
+        - AirPlay
+        - Google Cast
+        - Several of these
+        - None
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: probe
+    attributes:
+      label: tvprobe --report output
+      description: Run `tvprobe --report --no-wifi` with the TV on its home screen and paste everything.
+      render: json
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Picture and sound on the TV
+        - Picture only
+        - TV fetched the stream but never played
+        - TV never found
+        - Other (explain below)
+    validations:
+      required: true
+  - type: textarea
+    id: commands
+    attributes:
+      label: Exact commands that produced the result
+      description: Copy-paste, including flags. For a hack, the script and how you ran it.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Sound, latency, stability, and what the TV needed first
+      description: |
+        Sound: helper / BlackHole / none. Latency estimate. How long it stayed stable. Anything the TV needed (home screen, app open, dev mode, a remote press).
+    validations:
+      required: true
+  - type: textarea
+    id: failed
+    attributes:
+      label: What you tried that did not work
+      description: One line per attempt. Saves the next person hours.
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Mac model, macOS version, ffmpeg version, tvcast commit
+      placeholder: MacBook Air M2, macOS 15.3, ffmpeg 7.1, tvcast 57354d1
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Written with a coding agent?
+      description: Not a problem; we just want to know.
+      options:
+        - "No"
+        - "Yes, Claude Code"
+        - "Yes, another agent (say which in the notes)"
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I pasted `tvprobe --report` (not `--json`) and there are no full MAC addresses, Wi-Fi names, hostnames or home paths anywhere above.
+          required: true

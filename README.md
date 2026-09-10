@@ -140,7 +140,9 @@ tvprobe --no-wifi              # skip the Wi-Fi Direct scan (slow on macOS)
 |---|---|---|---|
 | "Weier" no-name set, HiSilicon Hi3751V350 | Android 9, stagefright player | DLNA | Works with sound. About 2 s latency. Only speaks DLNA (no ADB, Cast or DIAL). Its player gives up if the first byte takes more than a second or two. |
 
-Add yours with a pull request.
+Add yours: open a [TV report](https://github.com/bapierre/Save-Airbnb-TVs/issues/new?template=tv_report.yml)
+or send a pull request with a `hacks/<brand>-<model>/` folder. `CONTRIBUTING.md` explains
+what a report must contain; `tvprobe --report` produces the sanitized fingerprint to paste.
 
 ## Roadmap
 
@@ -151,7 +153,13 @@ Add yours with a pull request.
 - DIAL: launch the TV's own YouTube app with a video
 - Linux capture (PipeWire) so the probe and cast both run on Linux
 
-## Development
+## Contributing
+
+Hack your rental's TV, then tell us everything: model, platform, `tvprobe --report`
+output, the exact commands, sound, latency, what failed. Rough code is welcome in
+`hacks/`; the report is mandatory. Complete reports get merged, reproduced reports get
+a row above, and the good techniques get promoted into `tvcast` with tests. Read
+`CONTRIBUTING.md`, and point your coding agent at `AGENTS.md`.
 
 ```bash
 python3 -m unittest discover -s tests -t . -v
