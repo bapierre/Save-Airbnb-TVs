@@ -30,6 +30,30 @@ PORTS = {
     9741: "Fire TV / vendor",
 }
 
+def is_multicast_or_broadcast(ip):
+    """True for addresses that can never be a device: multicast, broadcast, garbage."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    return addr.is_multicast or ip.endswith(".255") or ip == "255.255.255.255"
+
+
+def own_addresses():
+    """IPv4 addresses of this machine's interfaces (excluding loopback)."""
+    system = platform.system()
+    try:
+        out = subprocess.run(["ifconfig"] if system == "Darwin" else ["ip", "-o", "addr"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    addrs = set()
+    for m in re.finditer(r"inet (\d+\.\d+\.\d+\.\d+)", out):
+        if not m.group(1).startswith("127."):
+            addrs.add(m.group(1))
+    return addrs
+
+
 # Locally-administered bit in the first octet means a randomized MAC,
 # which in practice means a phone or laptop, not a TV.
 def is_randomized_mac(mac):

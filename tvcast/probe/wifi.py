@@ -10,11 +10,17 @@ import platform
 import re
 import subprocess
 
+# Set by scan_ssids(): True when macOS hid every SSID behind "<redacted>", which it
+# does unless the calling app has Location Services permission (macOS 14+).
+LAST_SCAN_REDACTED = False
+
 DIRECT_RE = re.compile(r"\bDIRECT[-_][A-Za-z0-9]{0,4}[-_]?([A-Za-z0-9 _\-]*)")
 
 
 def scan_ssids():
     """Return a list of visible SSIDs. macOS and Linux."""
+    global LAST_SCAN_REDACTED
+    LAST_SCAN_REDACTED = False
     system = platform.system()
     ssids = []
     if system == "Darwin":
@@ -40,6 +46,9 @@ def scan_ssids():
                             "wi-fi", "status")
                     if name and not any(s in lowered for s in skip):
                         ssids.append(name)
+        redacted = [s for s in ssids if s == "<redacted>"]
+        LAST_SCAN_REDACTED = bool(ssids) and len(redacted) == len(ssids)
+        ssids = [s for s in ssids if s != "<redacted>"]
     else:
         for cmd in (["nmcli", "-t", "-f", "SSID", "dev", "wifi"],
                     ["iwlist", "scanning"]):

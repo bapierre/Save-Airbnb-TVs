@@ -9,6 +9,7 @@ import re
 import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -31,24 +32,32 @@ def discover(timeout=5.0, targets=None):
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     sock.settimeout(0.4)
 
-    for st in targets:
-        msg = "\r\n".join([
-            "M-SEARCH * HTTP/1.1",
-            f"HOST: {SSDP_ADDR}:{SSDP_PORT}",
-            'MAN: "ssdp:discover"',
-            "MX: 2",
-            f"ST: {st}",
-            "", "",
-        ]).encode()
-        try:
-            sock.sendto(msg, (SSDP_ADDR, SSDP_PORT))
-        except OSError:
-            pass
-        time.sleep(0.1)
+    def send_search():
+        for st in targets:
+            msg = "\r\n".join([
+                "M-SEARCH * HTTP/1.1",
+                f"HOST: {SSDP_ADDR}:{SSDP_PORT}",
+                'MAN: "ssdp:discover"',
+                "MX: 2",
+                f"ST: {st}",
+                "", "",
+            ]).encode()
+            try:
+                sock.sendto(msg, (SSDP_ADDR, SSDP_PORT))
+            except OSError:
+                pass
+            time.sleep(0.1)
+
+    send_search()
+    resend_at = time.time() + min(1.5, timeout / 2)
+    resent = False
 
     found = {}
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if not resent and time.time() >= resend_at:
+            send_search()  # a single burst is easy for a busy TV to miss
+            resent = True
         try:
             data, addr = sock.recvfrom(65507)
         except socket.timeout:
@@ -63,6 +72,7 @@ def discover(timeout=5.0, targets=None):
         ip = addr[0]
         entry = found.setdefault(ip, {"ip": ip, "headers": {}, "locations": set()})
         entry["headers"].update(headers)
+        entry.setdefault("search_targets", set()).add(headers.get("st", ""))
         if headers.get("location"):
             entry["locations"].add(headers["location"])
     sock.close()
@@ -87,7 +97,8 @@ def fetch_description(location, timeout=4.0):
     except ET.ParseError:
         return None
 
-    info = {"services": [], "location": location}
+    info = {"services": [], "location": location, "avtransport_control": None}
+    base = None
     for elem in root.iter():
         tag = _strip_ns(elem.tag)
         if tag == "friendlyName" and "friendly_name" not in info:
@@ -100,10 +111,17 @@ def fetch_description(location, timeout=4.0):
             info["model_number"] = (elem.text or "").strip()
         elif tag == "deviceType" and "device_type" not in info:
             info["device_type"] = (elem.text or "").strip()
-        elif tag == "serviceType":
-            st = (elem.text or "").strip()
-            if st:
-                info["services"].append(st)
+        elif tag == "URLBase" and elem.text and elem.text.strip():
+            base = elem.text.strip()
+    for svc in root.iter():
+        if _strip_ns(svc.tag) != "service":
+            continue
+        fields = {_strip_ns(c.tag): (c.text or "").strip() for c in svc}
+        st = fields.get("serviceType", "")
+        if st:
+            info["services"].append(st)
+        if "AVTransport" in st and fields.get("controlURL") and not info["avtransport_control"]:
+            info["avtransport_control"] = urllib.parse.urljoin(base or location, fields["controlURL"])
 
     info["has_avtransport"] = any("AVTransport" in s for s in info["services"])
     info["has_rendering_control"] = any("RenderingControl" in s for s in info["services"])
@@ -120,6 +138,9 @@ def describe_all(found, timeout=4.0):
                 descriptions.append(desc)
         entry["descriptions"] = descriptions
         entry["has_avtransport"] = any(d.get("has_avtransport") for d in descriptions)
+        entry["avtransport_control"] = next(
+            (d["avtransport_control"] for d in descriptions if d.get("avtransport_control")), None)
+        entry["dial"] = any("dial" in st for st in entry.get("search_targets", set()))
         names = [d.get("friendly_name") for d in descriptions if d.get("friendly_name")]
         entry["friendly_name"] = names[0] if names else None
         models = [d.get("model") for d in descriptions if d.get("model")]

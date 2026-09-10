@@ -73,9 +73,13 @@ def gather(args):
             known_ips.update(hostmod.sweep(net))
         arp = hostmod.arp_table()
 
-    known_ips = {ip for ip in known_ips
-                 if not ip.startswith("127.") and not ip.startswith("169.254.")
-                 and not ip.endswith(".255")}
+    own = hostmod.own_addresses()
+
+    def is_probe_worthy(ip):
+        return (not ip.startswith("127.") and not ip.startswith("169.254.")
+                and ip not in own and not hostmod.is_multicast_or_broadcast(ip))
+
+    known_ips = {ip for ip in known_ips if is_probe_worthy(ip)}
 
     # 5. Port scan + HTTP fingerprints, in parallel across hosts
     log(c(f"→ probing {len(known_ips)} host(s)…", DIM, color), quiet)
@@ -105,6 +109,8 @@ def gather(args):
     by_ip = {r["ip"]: r for r in records}
     for entry in instances.values():
         for addr in entry["addresses"]:
+            if not is_probe_worthy(addr):
+                continue
             rec = by_ip.setdefault(addr, {"ip": addr, "open_ports": []})
             rec.setdefault("mdns_instances", []).append(entry["instance"])
             rec.setdefault("mdns_services", []).extend(entry["services"])
@@ -114,8 +120,12 @@ def gather(args):
             if txt.get("fn") and not rec.get("friendly_name"):
                 rec["friendly_name"] = txt["fn"]
     for ip, entry in ssdp_hits.items():
+        if not is_probe_worthy(ip):
+            continue
         rec = by_ip.setdefault(ip, {"ip": ip, "open_ports": []})
         rec["has_avtransport"] = entry.get("has_avtransport", False)
+        rec["has_dial"] = entry.get("dial", False)
+        rec["avtransport_control"] = entry.get("avtransport_control")
         if entry.get("friendly_name"):
             rec.setdefault("friendly_name", entry["friendly_name"])
         if entry.get("model"):
@@ -140,6 +150,8 @@ def gather(args):
 
     report = verdictmod.build_report(records, direct_groups, p2p_ok, p2p_reason)
     report["hosts"] = records
+    report["own_addresses"] = sorted(own)
+    report["wifi_redacted"] = wifi.LAST_SCAN_REDACTED
     return report, color
 
 
@@ -188,6 +200,10 @@ def render(report, color):
              None: col("unknown", YELLOW)}[report["p2p_supported"]]
     print(f"   this machine can act as a Miracast sender: {state}")
     print(col(f"   {report['p2p_reason']}", DIM))
+    if report.get("wifi_redacted"):
+        print(col("   macOS hid every Wi-Fi name (Location Services permission is needed to read "
+                  "SSIDs).", YELLOW))
+        print(col("   The DIRECT-* name is shown on the TV's own mirroring screen instead.", DIM))
 
     print()
     print(col("What to do next", BOLD))

@@ -5,7 +5,9 @@ came back, say which streaming path is actually available and what to
 run next.
 """
 
-TRANSPORTS = ["cast", "airplay", "dlna", "adb", "roku", "samsung", "miracast"]
+import re
+
+TRANSPORTS = ["cast", "airplay", "dlna", "dial", "adb", "roku", "samsung", "miracast"]
 
 
 def classify_host(host):
@@ -24,6 +26,8 @@ def classify_host(host):
         found.append("airplay")
     if host.get("has_avtransport"):
         found.append("dlna")
+    if host.get("has_dial"):
+        found.append("dial")
     if 5555 in ports:
         found.append("adb")
     if 8060 in ports or host.get("roku_info"):
@@ -45,12 +49,16 @@ def best_name(host):
     return None
 
 
+def _plausible_model(value):
+    return bool(value) and re.search("[A-Za-z]", value) is not None
+
+
 def best_model(host):
     for key in ("cast_info", "roku_info", "samsung_info", "airplay_info"):
         info = host.get(key)
-        if info and info.get("model"):
+        if info and _plausible_model(info.get("model")):
             return info["model"]
-    return host.get("model")
+    return host.get("model") if _plausible_model(host.get("model")) else None
 
 
 def looks_like_tv(host):
@@ -107,6 +115,11 @@ ADVICE = {
         "Tizen, not Android. Use the websocket remote API or DLNA; ADB is not "
         "available without developer mode over port 26101."
     ),
+    "dial": (
+        "DIAL available",
+        "The TV can launch its own YouTube/Netflix app from the network. Use "
+        "`tvcast` over DLNA for mirroring; a DIAL launcher is on the roadmap."
+    ),
 }
 
 
@@ -116,14 +129,16 @@ def build_report(hosts, direct_groups, p2p_ok, p2p_reason):
     for host in hosts:
         score, reasons = looks_like_tv(host)
         transports = classify_host(host)
-        if score <= 0 and not transports:
-            continue
+        name_hit = any(r.startswith("name mentions") for r in reasons)
+        if not transports and not name_hit:
+            continue  # a stable MAC alone is not evidence of a TV (routers have one too)
         candidates.append({
             "ip": host.get("ip"),
             "mac": host.get("mac"),
             "name": best_name(host),
             "model": best_model(host),
             "transports": transports,
+            "avtransport_control": host.get("avtransport_control"),
             "open_ports": host.get("open_ports", []),
             "score": score,
             "reasons": reasons,
