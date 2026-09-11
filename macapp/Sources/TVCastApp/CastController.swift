@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import CoreGraphics
+import CoreAudio
 import TVCastKit
 
 /// Ties the engine together for the UI: discover TVs, start/stop casting, resync. Runs the
@@ -33,7 +34,15 @@ final class CastController: ObservableObject {
     private let stopFlag = AtomicFlag()
     private let resyncFlag = AtomicFlag()
     private var server: StreamServer?
-    private var wasMuted = false
+    private var didMute = false
+
+    init() {
+        // Never leave the Mac muted if the app quits mid-cast.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            if self?.didMute == true { MacAudio.setMuted(false) }
+        }
+    }
 
     func refresh() {
         isBusy = true
@@ -77,8 +86,11 @@ final class CastController: ObservableObject {
         self.server = server
 
         // Mute the Mac speakers so the show does not play twice.
-        wasMuted = MacAudio.isMuted()
-        if !wasMuted { MacAudio.setMuted(true) }
+        didMute = false
+        if !MacAudio.isMuted() {
+            didMute = MacAudio.setMuted(true)
+            if !didMute { status = "note: could not mute the Mac; lower its volume to avoid echo" }
+        }
 
         Task.detached { [weak self] in
             guard let self else { return }
@@ -121,21 +133,50 @@ final class CastController: ObservableObject {
         self.status = status
         self.isCasting = false
         self.server = nil
-        if !wasMuted { MacAudio.setMuted(false) }
+        if didMute { MacAudio.setMuted(false); didMute = false }
     }
 
 }
 
 enum MacAudio {
-    static func run(_ script: String) -> String {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", script]
-        let pipe = Pipe(); p.standardOutput = pipe
-        try? p.run(); p.waitUntilExit()
-        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func defaultOutputDevice() -> AudioDeviceID? {
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let st = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                            &addr, 0, nil, &size, &id)
+        return st == noErr && id != 0 ? id : nil
     }
-    static func isMuted() -> Bool { run("output muted of (get volume settings)") == "true" }
-    static func setMuted(_ m: Bool) { _ = run(m ? "set volume with output muted" : "set volume without output muted") }
+
+    private static func muteAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                   mScope: kAudioDevicePropertyScopeOutput,
+                                   mElement: kAudioObjectPropertyElementMain)
+    }
+
+    static func isMuted() -> Bool {
+        guard let dev = defaultOutputDevice() else { return false }
+        var addr = muteAddress()
+        guard AudioObjectHasProperty(dev, &addr) else { return false }
+        var muted: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let st = AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &muted)
+        return st == noErr && muted != 0
+    }
+
+    @discardableResult
+    static func setMuted(_ m: Bool) -> Bool {
+        guard let dev = defaultOutputDevice() else { return false }
+        var addr = muteAddress()
+        guard AudioObjectHasProperty(dev, &addr) else { return false }
+        var settable: DarwinBoolean = false
+        guard AudioObjectIsPropertySettable(dev, &addr, &settable) == noErr, settable.boolValue
+        else { return false }
+        var val: UInt32 = m ? 1 : 0
+        return AudioObjectSetPropertyData(dev, &addr, 0, nil,
+                                          UInt32(MemoryLayout<UInt32>.size), &val) == noErr
+    }
 }
