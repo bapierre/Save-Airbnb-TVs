@@ -46,6 +46,9 @@ def main(argv=None):
                    help="video bitrate, also the burst cap (default 3M; try 2M on busy Wi-Fi)")
     p.add_argument("--port", type=int, default=8090)
     p.add_argument("--timeout", type=float, default=4.0, help="SSDP discovery seconds")
+    p.add_argument("--nudge", nargs="?", type=int, const=240, default=0, metavar="SECONDS",
+                   help="experimental: every SECONDS (default 240) send a harmless DLNA command "
+                        "to try to keep the TV awake. Prefer turning off the TV's screensaver.")
     p.add_argument("--keep-mac-audio", action="store_true",
                    help="do not mute the Mac's speakers while the TV plays the sound")
     p.add_argument("--list-devices", action="store_true", help="show capture devices and exit")
@@ -109,7 +112,8 @@ def main(argv=None):
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     log("→ asking the TV to play (Ctrl-C to stop)")
-    session = Session(DlnaLauncher(target.control_url), server, url, log, stop)
+    session = Session(DlnaLauncher(target.control_url), server, url, log, stop,
+                      nudge_interval=args.nudge)
 
     def rediscover():
         found = [t for t in discovery.find_renderers(args.timeout) if t.ip == target.ip]

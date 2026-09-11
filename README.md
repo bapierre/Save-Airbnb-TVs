@@ -57,14 +57,26 @@ tvcast --quality 1080p          # default is 720p
 tvcast --audio none             # video only
 tvcast --audio "BlackHole"      # use a loopback audio device instead of the helper
 tvcast --keep-mac-audio         # do not mute the Mac's speakers while casting
+tvcast --nudge                  # experimental: try to keep the TV awake (see below)
 tvcast --list-devices           # show what ffmpeg can capture
 ```
 
 While sound is streaming to the TV, tvcast mutes the Mac's own speakers so the show does
 not play twice a few seconds apart, and unmutes them when you stop.
 
-Expect two to three seconds of delay between your screen and the TV. That is fine for
-shows and useless for games.
+## Latency
+
+Expect a few seconds of delay between your screen and the TV. It is fine for watching a
+show and useless for anything interactive.
+
+Almost all of that delay is the TV's own receive buffer, not the Mac. Measured on the
+pipeline, the first byte leaves the Mac about 0.3 s after capture and the stream's clock
+tracks real time exactly. A cheap TV then prebuffers several seconds before it shows the
+first frame and holds that offset for the whole session. How much it buffers is the TV's
+decision; tvcast already sends every packet the instant it is ready and never holds a
+frame back. Lowering `--bitrate` does not reduce this delay, because the buffer is a
+number of seconds, not of bytes. If your TV's delay is large, the only real levers are on
+the TV: some sets have a "low latency" or "game" picture mode that shrinks the buffer.
 
 ## How it works
 
@@ -98,11 +110,21 @@ Jellyfin, browsers and local players all work.
 accepts the URL and then stops. tvcast retries a few times and tells you to press a
 button on the remote.
 
-**Turn off the TV's sleep timer before an episode.** Cheap Android sets go to sleep a few
-minutes after the last remote press even while they are playing a DLNA stream, and some
-restart their DLNA service on a new port when they wake (tvcast re-discovers the TV when
-that happens). Look in Settings, then Device Preferences, then Screen saver, for "Put
-device to sleep" and set it to Never; also switch off any Sleep timer or Auto power off.
+**Turn off the TV's sleep timer before an episode.** This is the reliable fix, and it
+takes ten seconds. Cheap Android sets go to sleep a few minutes after the last remote
+press even while they are playing a DLNA stream, and some restart their DLNA service on a
+new port when they wake (tvcast re-discovers the TV when that happens). Look in Settings,
+then Device Preferences, then Screen saver, for "Put device to sleep" and set it to Never;
+also switch off any Sleep timer or Auto power off. On other platforms the same setting
+lives under Settings, then Power, or Timer. Once it is off, a run lasts as long as you
+leave it.
+
+**Or try `tvcast --nudge` (experimental).** If you would rather not change the TV's
+settings, `--nudge` sends a harmless DLNA command every few minutes (`--nudge 180` for
+every 180 seconds) to simulate activity. It is standard UPnP and safe on any renderer,
+but whether it actually holds off the screensaver depends on the TV; several sets, ours
+included, ignore network activity and sleep anyway. The settings change is what we
+recommend. There is no reliable way to keep an arbitrary TV awake purely from the Mac.
 
 **Wi-Fi Direct scan on modern macOS.** `tvprobe` looks for `DIRECT-*` networks, but since
 macOS 14 the OS hides Wi-Fi names from programs without Location Services permission.

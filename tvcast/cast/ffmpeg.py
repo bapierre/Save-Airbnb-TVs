@@ -115,5 +115,8 @@ def build_argv(ffmpeg, inputs, spec, has_audio):
         argv += ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
     else:
         argv += ["-an"]
-    argv += ["-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", "-"]
+    # Emit TS packets the instant they are ready and never hold frames back to reorder,
+    # so nothing waits on our side of the wire. The TV's own prebuffer dominates latency.
+    argv += ["-muxdelay", "0", "-muxpreload", "0", "-max_delay", "0", "-flush_packets", "1",
+             "-f", "mpegts", "-"]
     return argv

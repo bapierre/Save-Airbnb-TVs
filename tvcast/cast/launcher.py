@@ -116,6 +116,11 @@ class DlnaLauncher:
     def stop(self):
         self._avt("Stop")
 
+    def nudge(self):
+        """Re-issue Play on an already-playing renderer: a control command with no visible
+        effect that some TVs count as activity, holding off their screensaver."""
+        self._avt("Play", Speed="1")
+
     def state(self):
         try:
             s = self._avt("GetTransportInfo").get("CurrentTransportState", "UNKNOWN")

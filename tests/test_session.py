@@ -63,6 +63,7 @@ class FakeLauncher:
     def __init__(self, states, fail_play=False):
         self.states = list(states)
         self.calls = []
+        self.nudge_calls = []
         self.fail_play = fail_play
 
     def play(self, url, title="Mac screen"):
@@ -78,6 +79,9 @@ class FakeLauncher:
 
     def position(self):
         return "00:00:01"
+
+    def nudge(self):
+        self.nudge_calls.append(1)
 
 
 class FakeServer:
@@ -198,6 +202,35 @@ class TestSession(unittest.TestCase):
         s.rediscover = lambda: new
         self.assertEqual(s.run(), 0)
         self.assertEqual(new.calls[0], ("play", "http://m/screen.ts"))
+
+    def test_nudge_fires_while_playing_when_enabled(self):
+        launcher = FakeLauncher(["PLAYING"])
+        stop = threading.Event()
+        polls = []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) >= 8:
+                stop.set()
+
+        s = self.make(launcher, FakeServer(), stop, clock_step=5, sleep=sleep)
+        s.nudge_interval = 12
+        s.run()
+        self.assertGreaterEqual(len(launcher.nudge_calls), 1)
+
+    def test_no_nudge_by_default(self):
+        launcher = FakeLauncher(["PLAYING"])
+        stop = threading.Event()
+        polls = []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) >= 6:
+                stop.set()
+
+        s = self.make(launcher, FakeServer(), stop, clock_step=5, sleep=sleep)
+        s.run()
+        self.assertEqual(launcher.nudge_calls, [])
 
     def test_play_failure_exits_1(self):
         launcher = FakeLauncher(["STOPPED"], fail_play=True)

@@ -60,7 +60,7 @@ class Watcher:
 
 class Session:
     def __init__(self, launcher, server, url, log, stop_event, sleep=time.sleep,
-                 clock=time.monotonic, poll_interval=2.0):
+                 clock=time.monotonic, poll_interval=2.0, nudge_interval=0):
         self.launcher, self.server, self.url, self.log = launcher, server, url, log
         self.stop_event, self.sleep, self.clock = stop_event, sleep, clock
         self.poll = poll_interval
@@ -69,6 +69,9 @@ class Session:
         # restart their UPnP service on a new random port mid-session.
         self.rediscover = None
         self.unknown_streak = 0
+        # Seconds between keep-awake nudges (0 = off). Experimental: some TVs treat any
+        # AVTransport control command as activity and hold off their screensaver.
+        self.nudge_interval = nudge_interval
 
     def _play(self):
         """Ask the TV to play; on an unreachable TV, re-discover it once and try again."""
@@ -106,22 +109,34 @@ class Session:
             return 1
         code = 0
         last = None
+        last_nudge = None
         retries_left = self.start_retries
         while not self.stop_event.is_set():
             self.sleep(self.poll)
             if self.stop_event.is_set():
                 break
             state = self.launcher.state()
+            now = self.clock()
             if state != last:
                 self.log(f"TV: {state}")
                 last = state
+            if self.nudge_interval and state == "PLAYING":
+                if last_nudge is None:
+                    last_nudge = now
+                elif now - last_nudge >= self.nudge_interval:
+                    last_nudge = now
+                    try:
+                        self.launcher.nudge()
+                        self.log("nudged the TV to keep it awake")
+                    except (UpnpError, AttributeError) as e:
+                        self.log(f"nudge failed (ignored): {e}")
             self.unknown_streak = self.unknown_streak + 1 if state == "UNKNOWN" else 0
             if self.unknown_streak >= 3 and self._rediscover():
                 self.unknown_streak = 0
                 watcher = Watcher()
                 self._play()
                 continue
-            action = watcher.tick(state, self.clock())
+            action = watcher.tick(state, now)
             if action == "timeout":
                 if retries_left > 0:
                     retries_left -= 1
