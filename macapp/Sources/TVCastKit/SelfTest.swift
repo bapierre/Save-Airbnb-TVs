@@ -180,3 +180,26 @@ public func runSessionSelfTest() -> Int {
 
 /// Tiny reference box so injected closures can mutate a captured value.
 final class Box<T> { var value: T; init(_ v: T) { value = v } }
+
+/// Pure capture-config checks (no screen, no ffmpeg run) so they pass anywhere.
+public func runCaptureSelfTest() -> Int {
+    var failures = 0
+    func check(_ cond: Bool, _ name: String) {
+        if cond { print("ok   - \(name)") } else { failures += 1; print("FAIL - \(name)") }
+    }
+    check(fitSize(displayW: 3024, displayH: 1964, maxW: 1280, maxH: 720) == (1108, 720), "fitSize wide display")
+    check(fitSize(displayW: 1920, displayH: 1080, maxW: 1280, maxH: 720) == (1280, 720), "fitSize 16:9 fills")
+    let (w, h) = fitSize(displayW: 1512, displayH: 982, maxW: 1280, maxH: 720)
+    check(w % 2 == 0 && h % 2 == 0 && h <= 720, "fitSize dimensions even and bounded")
+
+    let argv = ffmpegRawpipeArgv(width: 1108, height: 720, spec: VideoSpec(), audioFifo: "/tmp/a.fifo")
+    check(argv.contains("h264_videotoolbox"), "argv uses hardware encoder")
+    check(argv.contains("-maxrate") && argv.contains("-flush_packets"), "argv caps bursts and flushes")
+    check(argv.contains("pipe:0") && argv.contains("/tmp/a.fifo"), "argv reads video pipe and audio fifo")
+    check(argv.contains("aac"), "argv encodes audio when a fifo is given")
+    let videoOnly = ffmpegRawpipeArgv(width: 1108, height: 720, spec: VideoSpec(), audioFifo: nil)
+    check(videoOnly.contains("-an") && !videoOnly.contains("aac"), "argv is video-only without a fifo")
+
+    print(failures == 0 ? "\nCAPTURE PASS" : "\n\(failures) CAPTURE FAILURE(S)")
+    return failures
+}
