@@ -49,3 +49,68 @@ public func runSelfTests() -> Int {
     print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
     return failures
 }
+
+/// Live-server check: start the server with a fixed-bytes source, GET over loopback,
+/// verify the DLNA headers and that the whole payload streams through. Returns failures.
+public func runServerSelfTest() -> Int {
+    var failures = 0
+    func check(_ cond: Bool, _ name: String) {
+        if cond { print("ok   - \(name)") } else { failures += 1; print("FAIL - \(name)") }
+    }
+
+    final class FixedSource: MediaSource {
+        var buf: Data
+        var stopped = false
+        init(_ d: Data) { buf = d }
+        func read(_ maxBytes: Int) -> Data {
+            if buf.isEmpty { return Data() }
+            let n = min(maxBytes, buf.count)
+            let head = buf.prefix(n)
+            buf.removeFirst(n)
+            return Data(head)
+        }
+        func stop() { stopped = true }
+    }
+
+    let payload = Data(repeating: 0x47, count: 188 * 100)
+    var made: [FixedSource] = []
+    let server = StreamServer(makeSource: { let s = FixedSource(payload); made.append(s); return s })
+    guard let port = try? server.start(port: 0) else {
+        print("FAIL - server did not start"); return 1
+    }
+    defer { server.stop() }
+
+    let sem = DispatchSemaphore(value: 0)
+    var body: Data?
+    var contentType: String?
+    var transferMode: String?
+    var url = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/screen.ts")!)
+    url.timeoutInterval = 5
+    URLSession.shared.dataTask(with: url) { data, resp, _ in
+        body = data
+        if let http = resp as? HTTPURLResponse {
+            contentType = http.value(forHTTPHeaderField: "Content-Type")
+            transferMode = http.value(forHTTPHeaderField: "transferMode.dlna.org")
+        }
+        sem.signal()
+    }.resume()
+    _ = sem.wait(timeout: .now() + 6)
+
+    check(contentType == "video/mpeg", "server Content-Type is video/mpeg")
+    check(transferMode == "Streaming", "server sends DLNA transferMode header")
+    check(body?.count == payload.count, "server streamed the full payload")
+    check(made.first?.stopped == true, "server stopped the source on disconnect")
+
+    // 404 for an unknown path
+    let sem2 = DispatchSemaphore(value: 0)
+    var status = 0
+    URLSession.shared.dataTask(with: URL(string: "http://127.0.0.1:\(port)/nope")!) { _, resp, _ in
+        status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        sem2.signal()
+    }.resume()
+    _ = sem2.wait(timeout: .now() + 6)
+    check(status == 404, "server 404s unknown path")
+
+    print(failures == 0 ? "\nSERVER PASS" : "\n\(failures) SERVER FAILURE(S)")
+    return failures
+}
