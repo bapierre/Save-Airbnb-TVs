@@ -40,6 +40,13 @@ struct ContentView: View {
                 .help("Search again")
             }
 
+            Picker("Quality", selection: $controller.quality) {
+                ForEach(Quality.allCases) { q in Text(q.rawValue).tag(q) }
+            }
+            .labelsHidden()
+            .disabled(controller.isCasting)
+            .help("Lower quality if the picture keeps buffering on weak Wi-Fi")
+
             Text(controller.status)
                 .font(.caption)
                 .foregroundStyle(.secondary)

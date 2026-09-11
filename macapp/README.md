@@ -15,7 +15,11 @@ locally:
 - **Capture** — ScreenCaptureKit video + system audio into ffmpeg, as a stream source
   (`Capture.swift`, helper in `Sources/sckcap`).
 
-The UI (`Sources/TVCastApp`) is a `MenuBarExtra` with a TV picker and Play, Resync and Stop.
+The UI (`Sources/TVCastApp`) is a `MenuBarExtra` with a TV picker, a quality preset (Smooth
+480p / Balanced 720p / Sharp 1080p), and Play, Resync and Stop.
+
+If the picture keeps buffering, the Wi-Fi cannot carry the stream: pick a lower quality.
+Smooth (480p, ~1.5 Mbps) survives weak or congested 2.4 GHz links that stall 720p.
 
 ## Build and run
 

@@ -5,8 +5,25 @@ import TVCastKit
 
 /// Ties the engine together for the UI: discover TVs, start/stop casting, resync. Runs the
 /// blocking session on a background thread and publishes state for SwiftUI.
+/// Bandwidth presets. Lower ones give a weak or congested Wi-Fi more headroom, trading
+/// sharpness for a stream that does not stall.
+enum Quality: String, CaseIterable, Identifiable {
+    case smooth = "Smooth (480p)"
+    case balanced = "Balanced (720p)"
+    case sharp = "Sharp (1080p)"
+    var id: String { rawValue }
+    var spec: VideoSpec {
+        switch self {
+        case .smooth: return VideoSpec(width: 854, height: 480, fps: 30, bitrate: "1500k")
+        case .balanced: return VideoSpec(width: 1280, height: 720, fps: 30, bitrate: "3M")
+        case .sharp: return VideoSpec(width: 1920, height: 1080, fps: 30, bitrate: "6M")
+        }
+    }
+}
+
 @MainActor
 final class CastController: ObservableObject {
+    @Published var quality: Quality = .balanced
     @Published var renderers: [Renderer] = []
     @Published var selected: Renderer?
     @Published var status = "Idle"
@@ -48,7 +65,7 @@ final class CastController: ObservableObject {
         isCasting = true
         status = "Starting…"
 
-        let spec = VideoSpec()
+        let spec = quality.spec
         let d = CGMainDisplayID()
         let size = fitSize(displayW: CGDisplayPixelsWide(d), displayH: CGDisplayPixelsHigh(d),
                            maxW: spec.width, maxH: spec.height)
