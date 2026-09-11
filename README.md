@@ -98,6 +98,12 @@ Jellyfin, browsers and local players all work.
 accepts the URL and then stops. tvcast retries a few times and tells you to press a
 button on the remote.
 
+**Turn off the TV's sleep timer before an episode.** Cheap Android sets go to sleep a few
+minutes after the last remote press even while they are playing a DLNA stream, and some
+restart their DLNA service on a new port when they wake (tvcast re-discovers the TV when
+that happens). Look in Settings, then Device Preferences, then Screen saver, for "Put
+device to sleep" and set it to Never; also switch off any Sleep timer or Auto power off.
+
 **Wi-Fi Direct scan on modern macOS.** `tvprobe` looks for `DIRECT-*` networks, but since
 macOS 14 the OS hides Wi-Fi names from programs without Location Services permission.
 tvprobe says so instead of pretending nothing is there. The name is on the TV's
@@ -113,6 +119,7 @@ mirroring screen anyway.
 | `ffmpeg lists no 'Capture screen' device` | Screen Recording permission is missing for your terminal app. |
 | No sound on the TV | The helper did not build (see the messages at startup), so tvcast fell back to video only. Install the Command Line Tools, or install BlackHole and use `--audio BlackHole`. |
 | The TV shows a black screen | You are playing DRM content in Safari. Use Chrome, or a non-DRM source. |
+| Playback stops after 5 to 15 minutes and the TV then refuses every URL | The TV went to sleep. Press a remote button, then disable its sleep timer and screensaver (see above). |
 
 ## tvprobe
 

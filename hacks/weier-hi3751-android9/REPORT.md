@@ -44,6 +44,10 @@ and ConnectionManager. `GetProtocolInfo` lists MPEG-TS, MPEG, MP4, MKV, Motion J
 - **Stable:** several minutes in testing; longer runs welcome.
 - **Needed first:** TV awake and on its home screen. In standby or screensaver it accepts
   the URL, reports TRANSITIONING, then STOPPED, for any URL including public MP4s.
+- **Sleep timer:** the set goes to sleep on its own roughly ten minutes after the last
+  remote press, even while playing the stream, and its UPnP service comes back on a
+  different port (25826 became 25827). Disable the sleep timer in its settings before a
+  long watch; tvcast re-discovers the port if it changes.
 
 ## What did not work
 
