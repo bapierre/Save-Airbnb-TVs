@@ -109,11 +109,21 @@ def main(argv=None):
     log(f"→ serving {url}")
 
     stop = threading.Event()
+    resync = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    log("→ asking the TV to play (Ctrl-C to stop)")
+
+    interactive = sys.stdin is not None and sys.stdin.isatty()
+    if interactive:
+        log("→ playing. Press Enter to resync (drop the delay, e.g. between episodes), "
+            "q then Enter to stop, or Ctrl-C.")
+        _start_key_reader(stop, resync)
+    else:
+        log("→ asking the TV to play (Ctrl-C to stop)")
+
     session = Session(DlnaLauncher(target.control_url), server, url, log, stop,
                       nudge_interval=args.nudge)
+    session.resync_event = resync
 
     def rediscover():
         found = [t for t in discovery.find_renderers(args.timeout) if t.ip == target.ip]
@@ -122,6 +132,22 @@ def main(argv=None):
     session.rediscover = rediscover
     with macaudio.MutedWhileCasting(enabled=streaming_audio and not args.keep_mac_audio, log=log):
         return session.run()
+
+
+def _start_key_reader(stop, resync):
+    """Read keys from the terminal: Enter resyncs, 'q' quits. Runs on a daemon thread."""
+    def loop():
+        try:
+            for line in sys.stdin:
+                if stop.is_set():
+                    break
+                if line.strip().lower() == "q":
+                    stop.set()
+                    break
+                resync.set()  # Enter (or any other line) triggers a resync
+        except (OSError, ValueError):
+            pass
+    threading.Thread(target=loop, daemon=True).start()
 
 
 if __name__ == "__main__":

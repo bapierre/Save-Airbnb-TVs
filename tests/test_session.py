@@ -232,6 +232,26 @@ class TestSession(unittest.TestCase):
         s.run()
         self.assertEqual(launcher.nudge_calls, [])
 
+    def test_resync_reestablishes_the_stream_without_ending(self):
+        import threading as _t
+        launcher = FakeLauncher(["PLAYING"])
+        stop = _t.Event()
+        resync = _t.Event()
+        resync.set()  # ask for a resync on the first loop iteration
+        polls = []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) >= 4:
+                stop.set()
+
+        s = self.make(launcher, FakeServer(), stop, clock_step=5, sleep=sleep)
+        s.resync_event = resync
+        self.assertEqual(s.run(), 0)
+        plays = [c for c in launcher.calls if c[0] == "play"]
+        self.assertGreaterEqual(len(plays), 2)  # initial + resync
+        self.assertFalse(resync.is_set())       # consumed
+
     def test_play_failure_exits_1(self):
         launcher = FakeLauncher(["STOPPED"], fail_play=True)
         logs = []

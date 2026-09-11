@@ -64,6 +64,11 @@ tvcast --list-devices           # show what ffmpeg can capture
 While sound is streaming to the TV, tvcast mutes the Mac's own speakers so the show does
 not play twice a few seconds apart, and unmutes them when you stop.
 
+While it runs in a terminal, press **Enter to resync** and **q then Enter to quit** (Ctrl-C
+also stops). Resync re-establishes the stream so the TV drops its buffer and jumps back to
+the live edge, erasing any delay that crept in. It does not end the session, so it is the
+quick fix when you switch episodes and the picture is running behind.
+
 ## Latency
 
 Expect a few seconds of delay between your screen and the TV. It is fine for watching a
@@ -181,6 +186,7 @@ what a report must contain; `tvprobe --report` produces the sanitized fingerprin
 - TV web browser fallback: an HLS page you type into the TV's browser
 - DIAL: launch the TV's own YouTube app with a video
 - Linux capture (PipeWire) so the probe and cast both run on Linux
+- A macOS menu-bar app wrapping the same core, with a one-click Resync button and a TV picker
 
 ## Contributing
 

@@ -72,6 +72,10 @@ class Session:
         # Seconds between keep-awake nudges (0 = off). Experimental: some TVs treat any
         # AVTransport control command as activity and hold off their screensaver.
         self.nudge_interval = nudge_interval
+        # Set this Event (from a UI or a keypress) to re-establish the stream: the TV drops
+        # its buffer and jumps back to the live edge, erasing accumulated delay. The watch
+        # session keeps running. Handy between episodes.
+        self.resync_event = None
 
     def _play(self):
         """Ask the TV to play; on an unreachable TV, re-discover it once and try again."""
@@ -115,6 +119,14 @@ class Session:
             self.sleep(self.poll)
             if self.stop_event.is_set():
                 break
+            if self.resync_event is not None and self.resync_event.is_set():
+                self.resync_event.clear()
+                self.log("resyncing: flushing the TV buffer and jumping to live…")
+                watcher = Watcher()
+                last_nudge = None
+                last = None
+                self._play()
+                continue
             state = self.launcher.state()
             now = self.clock()
             if state != last:
