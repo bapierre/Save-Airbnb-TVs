@@ -155,6 +155,50 @@ class TestSession(unittest.TestCase):
         s.start_retries = 2
         self.assertEqual(s.run(), 0)
 
+    def test_unreachable_tv_triggers_rediscovery(self):
+        class Unreachable(FakeLauncher):
+            def play(self, url, title="Mac screen"):
+                self.calls.append(("play", url))
+                raise UpnpError(None, "cannot reach")
+
+            def state(self):
+                return "UNKNOWN"
+
+        old = Unreachable(["UNKNOWN"])
+        new = FakeLauncher(["PLAYING"])
+        stop = threading.Event()
+        polls = []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) >= 12:
+                stop.set()
+
+        s = self.make(old, FakeServer(), stop, clock_step=5, sleep=sleep)
+        s.rediscover = lambda: new
+        s.start_retries = 0
+        # initial play on the old launcher fails as unreachable -> rediscover -> play on new
+        self.assertEqual(s.run(), 0)
+        self.assertEqual(old.calls[0], ("play", "http://m/screen.ts"))
+        self.assertEqual(new.calls[0], ("play", "http://m/screen.ts"))
+        self.assertEqual(new.calls[-1], ("stop",))
+
+    def test_unknown_state_while_playing_rediscovers(self):
+        old = FakeLauncher(["PLAYING", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"])
+        new = FakeLauncher(["PLAYING"])
+        stop = threading.Event()
+        polls = []
+
+        def sleep(_):
+            polls.append(1)
+            if len(polls) >= 10:
+                stop.set()
+
+        s = self.make(old, FakeServer(), stop, clock_step=5, sleep=sleep)
+        s.rediscover = lambda: new
+        self.assertEqual(s.run(), 0)
+        self.assertEqual(new.calls[0], ("play", "http://m/screen.ts"))
+
     def test_play_failure_exits_1(self):
         launcher = FakeLauncher(["STOPPED"], fail_play=True)
         logs = []

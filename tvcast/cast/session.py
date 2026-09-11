@@ -65,14 +65,43 @@ class Session:
         self.stop_event, self.sleep, self.clock = stop_event, sleep, clock
         self.poll = poll_interval
         self.start_retries = 2  # TVs in standby or a screensaver need a remote press first
+        # Callable returning a fresh launcher, used when the TV stops answering. Some TVs
+        # restart their UPnP service on a new random port mid-session.
+        self.rediscover = None
+        self.unknown_streak = 0
+
+    def _play(self):
+        """Ask the TV to play; on an unreachable TV, re-discover it once and try again."""
+        try:
+            self.launcher.play(self.url)
+            return True
+        except UpnpError as e:
+            if e.code is not None or not self._rediscover():
+                self.log(f"TV refused the stream: {e}")
+                return False
+        try:
+            self.launcher.play(self.url)
+            return True
+        except UpnpError as e:
+            self.log(f"TV refused the stream after rediscovery: {e}")
+            return False
+
+    def _rediscover(self):
+        if not self.rediscover:
+            return False
+        self.log("TV stopped answering; looking for it again…")
+        new = self.rediscover()
+        if not new:
+            self.log("TV not found. Is it still on the Wi-Fi?")
+            return False
+        self.launcher = new
+        self.log(f"TV found again at {getattr(new, 'control_url', '?')}")
+        return True
 
     def run(self):
         """Returns the process exit code."""
         watcher = Watcher()
-        try:
-            self.launcher.play(self.url)
-        except UpnpError as e:
-            self.log(f"TV refused the stream: {e}")
+        if not self._play():
             self.server.stop()
             return 1
         code = 0
@@ -86,6 +115,12 @@ class Session:
             if state != last:
                 self.log(f"TV: {state}")
                 last = state
+            self.unknown_streak = self.unknown_streak + 1 if state == "UNKNOWN" else 0
+            if self.unknown_streak >= 3 and self._rediscover():
+                self.unknown_streak = 0
+                watcher = Watcher()
+                self._play()
+                continue
             action = watcher.tick(state, self.clock())
             if action == "timeout":
                 if retries_left > 0:
@@ -94,20 +129,14 @@ class Session:
                              f"press a button on its remote. Retrying ({self.start_retries - retries_left}"
                              f"/{self.start_retries})…")
                     watcher = Watcher()
-                    try:
-                        self.launcher.play(self.url)
-                    except UpnpError as e:
-                        self.log(f"retry failed: {e}")
+                    self._play()
                     continue
                 self._explain_timeout(state)
                 code = 1
                 break
             if action == "relaunch":
                 self.log("TV stopped; relaunching")
-                try:
-                    self.launcher.play(self.url)
-                except UpnpError as e:
-                    self.log(f"relaunch failed: {e}")
+                self._play()
         try:
             self.launcher.stop()
         except UpnpError:

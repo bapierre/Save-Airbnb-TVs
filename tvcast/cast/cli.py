@@ -109,6 +109,12 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     log("→ asking the TV to play (Ctrl-C to stop)")
     session = Session(DlnaLauncher(target.control_url), server, url, log, stop)
+
+    def rediscover():
+        found = [t for t in discovery.find_renderers(args.timeout) if t.ip == target.ip]
+        return DlnaLauncher(found[0].control_url) if found else None
+
+    session.rediscover = rediscover
     with macaudio.MutedWhileCasting(enabled=streaming_audio and not args.keep_mac_audio, log=log):
         return session.run()
 
