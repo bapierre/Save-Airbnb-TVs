@@ -114,3 +114,69 @@ public func runServerSelfTest() -> Int {
     print(failures == 0 ? "\nSERVER PASS" : "\n\(failures) SERVER FAILURE(S)")
     return failures
 }
+
+/// Session/Watcher logic checks with a fake launcher (no TV, no real time).
+public func runSessionSelfTest() -> Int {
+    var failures = 0
+    func check(_ cond: Bool, _ name: String) {
+        if cond { print("ok   - \(name)") } else { failures += 1; print("FAIL - \(name)") }
+    }
+
+    final class FakeLauncher: Launcher {
+        var states: [TransportState]
+        var plays = 0
+        var nudges = 0
+        init(_ s: [TransportState]) { states = s }
+        func play(url: String, title: String) throws { plays += 1 }
+        func stop() throws {}
+        func nudge() throws { nudges += 1 }
+        func state() -> TransportState { states.count > 1 ? states.removeFirst() : states[0] }
+    }
+
+    // Watcher: never plays -> timeout after the window.
+    var w = Watcher(startTimeout: 15)
+    check(w.tick(state: .transitioning, now: 0) == .none, "watcher tolerates early transitioning")
+    check(w.tick(state: .stopped, now: 16) == .timeout, "watcher times out when never playing")
+
+    // Watcher: relaunch once per window after playing.
+    var w2 = Watcher(startTimeout: 15, relaunchWindow: 30)
+    _ = w2.tick(state: .playing, now: 1)
+    check(w2.tick(state: .stopped, now: 60) == .relaunch, "watcher relaunches after a stop")
+    check(w2.tick(state: .stopped, now: 70) == .none, "watcher waits out the relaunch window")
+
+    // Session: plays, sees PLAYING, stops on the stop flag.
+    var polls = 0
+    var stop = false
+    let clockBox = Box(0.0)
+    let launcher = FakeLauncher([.transitioning, .playing, .playing])
+    let session = Session(
+        launcher: launcher, url: "http://m/screen.ts", log: { _ in },
+        shouldStop: { stop },
+        sleep: { _ in polls += 1; if polls >= 3 { stop = true } },
+        clock: { clockBox.value += 2; return clockBox.value })
+    let rc = session.run()
+    check(rc == 0, "session returns 0 on clean stop")
+    check(launcher.plays >= 1, "session issued play")
+
+    // Session: resync triggers a re-play.
+    var polls2 = 0
+    var stop2 = false
+    var resync = true
+    let l2 = FakeLauncher([.playing])
+    let clock2 = Box(0.0)
+    let s2 = Session(
+        launcher: l2, url: "http://m/screen.ts", log: { _ in },
+        shouldStop: { stop2 },
+        sleep: { _ in polls2 += 1; if polls2 >= 4 { stop2 = true } },
+        clock: { clock2.value += 2; return clock2.value })
+    s2.shouldResync = { resync }
+    s2.clearResync = { resync = false }
+    _ = s2.run()
+    check(l2.plays >= 2, "session re-plays on resync (initial + resync)")
+
+    print(failures == 0 ? "\nSESSION PASS" : "\n\(failures) SESSION FAILURE(S)")
+    return failures
+}
+
+/// Tiny reference box so injected closures can mutate a captured value.
+final class Box<T> { var value: T; init(_ v: T) { value = v } }

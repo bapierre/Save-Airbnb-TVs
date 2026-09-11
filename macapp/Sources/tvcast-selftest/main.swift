@@ -1,3 +1,3 @@
 import TVCastKit
 import Foundation
-exit((runSelfTests() + runServerSelfTest()) == 0 ? 0 : 1)
+exit((runSelfTests() + runServerSelfTest() + runSessionSelfTest()) == 0 ? 0 : 1)
