@@ -38,6 +38,39 @@ swift run tvcast-native state             # read the TV's transport state
 swift run tvcast-native capture 6 out.ts  # capture 6s to a file (no TV)
 ```
 
+## Signing and notarizing
+
+Signing needs a paid Apple Developer membership and a **Developer ID Application**
+certificate. This Mac has none yet (`security find-identity -v -p codesigning` shows zero).
+To create one without full Xcode:
+
+1. Keychain Access → Certificate Assistant → *Request a Certificate From a Certificate
+   Authority* → "Saved to disk". This makes a `CertificateSigningRequest` file.
+2. developer.apple.com/account → Certificates → **+** → **Developer ID Application** →
+   upload the request → download the `.cer` → double-click to install it in your login
+   keychain.
+3. For notarization, create an app-specific password at appleid.apple.com (Sign-In and
+   Security → App-Specific Passwords), then store it once:
+   ```
+   xcrun notarytool store-credentials tvcast-notary \
+     --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PASSWORD
+   ```
+
+Then build and sign:
+
+```bash
+./make-app.sh release
+IDENTITY="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=tvcast-notary ./sign.sh
+```
+
+`sign.sh` signs with the hardened runtime, submits to Apple's notary service, and staples
+the ticket, so `TVCast.app` opens cleanly on any Mac. Omit `NOTARY_PROFILE` to sign only
+(fine for your own machine). ffmpeg runs as a separate process, so the hardened runtime
+does not require disabling library validation.
+
+A free Apple account cannot make a Developer ID certificate. If you do not want to sign,
+ship the app unsigned and tell users to right-click it and choose Open the first time.
+
 ## Remaining before distribution
 
 - Bundle a **static ffmpeg** in `Contents/Resources/` so the app is fully self-contained
