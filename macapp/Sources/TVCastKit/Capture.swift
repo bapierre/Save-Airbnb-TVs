@@ -1,4 +1,8 @@
 import Foundation
+import ScreenCaptureKit
+import AVFoundation
+import CoreMedia
+import CoreVideo
 
 /// Video size and rate for the encoded stream.
 public struct VideoSpec: Sendable {
@@ -13,13 +17,13 @@ public struct VideoSpec: Sendable {
 
 public enum CaptureError: Error, CustomStringConvertible {
     case ffmpegMissing
-    case helperMissing
     case launchFailed(String)
+    case noDisplay
     public var description: String {
         switch self {
         case .ffmpegMissing: return "ffmpeg not found"
-        case .helperMissing: return "the ScreenCaptureKit helper (sckcap) was not found"
         case .launchFailed(let m): return "capture failed to start: \(m)"
+        case .noDisplay: return "no display available to capture"
         }
     }
 }
@@ -55,32 +59,53 @@ public func ffmpegRawpipeArgv(width: Int, height: Int, spec: VideoSpec, audioFif
     return a
 }
 
-/// A live screen+audio MediaSource: the sckcap helper feeds NV12 video and PCM audio into
-/// ffmpeg, which emits MPEG-TS that `read` returns. Reuses the exact pipeline proven in the
-/// Python build.
-public final class ScreenCaptureSource: MediaSource {
+/// Holds the latest packed NV12 frame. ScreenCaptureKit only delivers on change, so a timer
+/// re-sends this at a constant rate to give ffmpeg a steady frame rate.
+private final class FrameStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var frame: Data
+    init(width: Int, height: Int) {
+        var d = Data(repeating: 16, count: width * height)          // Y: black
+        d.append(Data(repeating: 128, count: width * height / 2))   // UV: neutral
+        frame = d
+    }
+    func set(_ d: Data) { lock.lock(); frame = d; lock.unlock() }
+    func get() -> Data { lock.lock(); defer { lock.unlock() }; return frame }
+}
+
+/// A live screen+audio MediaSource that captures with ScreenCaptureKit **in this process**
+/// (no external helper, so only one Screen Recording grant) and feeds a bundled ffmpeg,
+/// whose MPEG-TS output `read` returns.
+public final class ScreenCaptureSource: NSObject, MediaSource, SCStreamOutput, SCStreamDelegate {
     private let ffmpegPath: String
-    private let helperPath: String
     private let spec: VideoSpec
-    private let captureSize: (Int, Int)
+    private let captureWidth: Int
+    private let captureHeight: Int
     private let withAudio: Bool
 
-    private var helper: Process?
+    private var stream: SCStream?
     private var ffmpeg: Process?
-    private var out: FileHandle?
+    private var videoIn: FileHandle?      // ffmpeg stdin (raw NV12)
+    private var tsOut: FileHandle?        // ffmpeg stdout (MPEG-TS)
+    private var audioFifoHandle: FileHandle?
     private var tmpDir: URL?
+    private let store: FrameStore
+    private var timer: DispatchSourceTimer?
+    private let audioLock = NSLock()
 
-    public init(ffmpegPath: String, helperPath: String, spec: VideoSpec,
-                captureSize: (Int, Int), withAudio: Bool = true) {
+    public init(ffmpegPath: String, spec: VideoSpec, captureSize: (Int, Int), withAudio: Bool = true) {
         self.ffmpegPath = ffmpegPath
-        self.helperPath = helperPath
         self.spec = spec
-        self.captureSize = captureSize
+        self.captureWidth = captureSize.0
+        self.captureHeight = captureSize.1
         self.withAudio = withAudio
+        self.store = FrameStore(width: captureSize.0, height: captureSize.1)
+        super.init()
     }
 
     public func start() throws {
-        let (cw, ch) = captureSize
+        signal(SIGPIPE, SIG_IGN)  // writing to a closed ffmpeg pipe must not kill the app
+
         var fifoPath: String?
         if withAudio {
             let dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -92,47 +117,169 @@ public final class ScreenCaptureSource: MediaSource {
             fifoPath = fifo
         }
 
-        var helperArgs = ["--width", "\(cw)", "--height", "\(ch)", "--fps", "\(spec.fps)"]
-        if let fifo = fifoPath { helperArgs += ["--audio-fifo", fifo] }
-        let helper = Process()
-        helper.executableURL = URL(fileURLWithPath: helperPath)
-        helper.arguments = helperArgs
-        let helperOut = Pipe()
-        helper.standardOutput = helperOut
-        helper.standardError = FileHandle.nullDevice
+        // Spawn ffmpeg: video on stdin (a Pipe we write to), audio on the fifo, TS on stdout.
+        let ff = Process()
+        ff.executableURL = URL(fileURLWithPath: ffmpegPath)
+        ff.arguments = ["-hide_banner", "-loglevel", "warning"]
+            + ffmpegRawpipeArgv(width: captureWidth, height: captureHeight, spec: spec, audioFifo: fifoPath)
+        let stdinPipe = Pipe()
+        let stdoutPipe = Pipe()
+        ff.standardInput = stdinPipe
+        ff.standardOutput = stdoutPipe
+        ff.standardError = FileHandle.nullDevice
+        do { try ff.run() } catch { throw CaptureError.launchFailed(error.localizedDescription) }
+        ffmpeg = ff
+        videoIn = stdinPipe.fileHandleForWriting
+        tsOut = stdoutPipe.fileHandleForReading
 
-        let ffmpeg = Process()
-        ffmpeg.executableURL = URL(fileURLWithPath: ffmpegPath)
-        ffmpeg.arguments = ["-hide_banner", "-loglevel", "warning"]
-            + ffmpegRawpipeArgv(width: cw, height: ch, spec: spec, audioFifo: fifoPath)
-        ffmpeg.standardInput = helperOut       // helper NV12 -> ffmpeg stdin
-        let tsOut = Pipe()
-        ffmpeg.standardOutput = tsOut
-        ffmpeg.standardError = FileHandle.nullDevice
-
-        do {
-            try helper.run()
-            try ffmpeg.run()
-        } catch {
-            throw CaptureError.launchFailed(error.localizedDescription)
+        // Opening a fifo for writing blocks until ffmpeg opens the read end; do it off-thread.
+        if let fifo = fifoPath {
+            Thread.detachNewThread { [weak self] in
+                let fh = FileHandle(forWritingAtPath: fifo)
+                self?.audioLock.lock(); self?.audioFifoHandle = fh; self?.audioLock.unlock()
+            }
         }
-        self.helper = helper
-        self.ffmpeg = ffmpeg
-        self.out = tsOut.fileHandleForReading
+
+        try startCapture()
+        startVideoTimer()
     }
 
+    private func startCapture() throws {
+        let sem = DispatchSemaphore(value: 0)
+        var startError: Error?
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first else { startError = CaptureError.noDisplay; sem.signal(); return }
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let cfg = SCStreamConfiguration()
+                cfg.width = captureWidth
+                cfg.height = captureHeight
+                cfg.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(spec.fps))
+                cfg.showsCursor = true
+                cfg.queueDepth = 5
+                if withAudio {
+                    cfg.capturesAudio = true
+                    cfg.sampleRate = 48000
+                    cfg.channelCount = 2
+                    cfg.excludesCurrentProcessAudio = true
+                }
+                let s = SCStream(filter: filter, configuration: cfg, delegate: self)
+                try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "tvcast.screen"))
+                if withAudio {
+                    try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "tvcast.audio"))
+                }
+                try await s.startCapture()
+                self.stream = s
+            } catch {
+                startError = error
+            }
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 10)
+        if let e = startError { throw CaptureError.launchFailed(String(describing: e)) }
+    }
+
+    private func startVideoTimer() {
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "tvcast.videoOut"))
+        t.schedule(deadline: .now(), repeating: 1.0 / Double(spec.fps), leeway: .milliseconds(2))
+        t.setEventHandler { [weak self] in
+            guard let self, let handle = self.videoIn else { return }
+            try? handle.write(contentsOf: self.store.get())
+        }
+        timer = t
+        t.resume()
+    }
+
+    // MARK: SCStreamOutput
+
+    public func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
+        switch type {
+        case .screen: handleVideo(sb)
+        case .audio: handleAudio(sb)
+        default: break
+        }
+    }
+
+    public func stream(_ stream: SCStream, didStopWithError error: Error) {
+        // Leave a black frame flowing; the session/watcher handles recovery upstream.
+    }
+
+    private func handleVideo(_ sb: CMSampleBuffer) {
+        if let att = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+           let status = att.first?[.status] as? Int, status != SCFrameStatus.complete.rawValue {
+            return
+        }
+        guard let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        guard CVPixelBufferGetPlaneCount(pb) == 2,
+              CVPixelBufferGetWidthOfPlane(pb, 0) == captureWidth,
+              CVPixelBufferGetHeightOfPlane(pb, 0) == captureHeight else { return }
+        var out = Data(capacity: captureWidth * captureHeight * 3 / 2)
+        for plane in 0..<2 {
+            guard let base = CVPixelBufferGetBaseAddressOfPlane(pb, plane) else { return }
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(pb, plane)
+            let rows = CVPixelBufferGetHeightOfPlane(pb, plane)
+            let rowBytes = CVPixelBufferGetWidthOfPlane(pb, plane) * (plane == 0 ? 1 : 2)
+            for r in 0..<rows {
+                out.append(base.advanced(by: r * stride).assumingMemoryBound(to: UInt8.self), count: rowBytes)
+            }
+        }
+        store.set(out)
+    }
+
+    private func handleAudio(_ sb: CMSampleBuffer) {
+        audioLock.lock(); let fh = audioFifoHandle; audioLock.unlock()
+        guard let fh else { return }
+        guard let fmt = CMSampleBufferGetFormatDescription(sb),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt)?.pointee else { return }
+        let channels = Int(asbd.mChannelsPerFrame)
+        let interleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
+        let frames = CMSampleBufferGetNumSamples(sb)
+        var out = [Float](repeating: 0, count: frames * 2)
+        do {
+            try sb.withAudioBufferList { abl, _ in
+                let buffers = Array(abl)
+                if !interleaved, buffers.count >= 2,
+                   let l = buffers[0].mData?.assumingMemoryBound(to: Float.self),
+                   let r = buffers[1].mData?.assumingMemoryBound(to: Float.self) {
+                    for i in 0..<frames { out[2 * i] = l[i]; out[2 * i + 1] = r[i] }
+                } else if !interleaved, let m = buffers.first?.mData?.assumingMemoryBound(to: Float.self) {
+                    for i in 0..<frames { out[2 * i] = m[i]; out[2 * i + 1] = m[i] }
+                } else if let p = buffers.first?.mData?.assumingMemoryBound(to: Float.self) {
+                    if channels >= 2 {
+                        for i in 0..<frames { out[2 * i] = p[i * channels]; out[2 * i + 1] = p[i * channels + 1] }
+                    } else {
+                        for i in 0..<frames { out[2 * i] = p[i]; out[2 * i + 1] = p[i] }
+                    }
+                }
+            }
+        } catch { return }
+        out.withUnsafeBytes { raw in
+            try? fh.write(contentsOf: Data(bytes: raw.baseAddress!, count: raw.count))
+        }
+    }
+
+    // MARK: MediaSource
+
     public func read(_ maxBytes: Int) -> Data {
-        guard let out else { return Data() }
-        return out.availableData  // blocks until data or EOF (empty)
+        tsOut?.availableData ?? Data()
     }
 
     public func stop() {
-        ffmpeg?.terminate()
-        helper?.terminate()
-        ffmpeg = nil
-        helper = nil
-        try? out?.close()
-        out = nil
+        timer?.cancel(); timer = nil
+        if let s = stream {
+            let sem = DispatchSemaphore(value: 0)
+            Task { try? await s.stopCapture(); sem.signal() }
+            _ = sem.wait(timeout: .now() + 3)
+            stream = nil
+        }
+        ffmpeg?.terminate(); ffmpeg = nil
+        try? videoIn?.close(); videoIn = nil
+        try? tsOut?.close(); tsOut = nil
+        audioLock.lock(); try? audioFifoHandle?.close(); audioFifoHandle = nil; audioLock.unlock()
         if let dir = tmpDir { try? FileManager.default.removeItem(at: dir); tmpDir = nil }
     }
 }

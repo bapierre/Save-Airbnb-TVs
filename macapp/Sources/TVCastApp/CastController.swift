@@ -41,7 +41,6 @@ final class CastController: ObservableObject {
         guard let ffmpeg = locateFFmpeg(bundledDir: Bundle.main.resourceURL) else {
             status = "ffmpeg not found (install it or bundle it in the app)"; return
         }
-        guard let helper = Self.helperPath() else { status = "capture helper missing"; return }
         guard let myIP = localIP(reaching: target.ip) else { status = "no route to \(target.ip)"; return }
 
         stopFlag.set(false)
@@ -54,7 +53,7 @@ final class CastController: ObservableObject {
         let size = fitSize(displayW: CGDisplayPixelsWide(d), displayH: CGDisplayPixelsHigh(d),
                            maxW: spec.width, maxH: spec.height)
         let server = StreamServer(makeSource: {
-            let s = ScreenCaptureSource(ffmpegPath: ffmpeg, helperPath: helper, spec: spec, captureSize: size)
+            let s = ScreenCaptureSource(ffmpegPath: ffmpeg, spec: spec, captureSize: size)
             try? s.start()
             return s
         })
@@ -108,14 +107,6 @@ final class CastController: ObservableObject {
         if !wasMuted { MacAudio.setMuted(false) }
     }
 
-    /// The bundled helper (in the .app) or, in dev, the sibling built binary.
-    static func helperPath() -> String? {
-        if let res = Bundle.main.resourceURL?.appendingPathComponent("sckcap").path,
-           FileManager.default.isExecutableFile(atPath: res) { return res }
-        let sibling = URL(fileURLWithPath: CommandLine.arguments[0])
-            .deletingLastPathComponent().appendingPathComponent("sckcap").path
-        return FileManager.default.isExecutableFile(atPath: sibling) ? sibling : nil
-    }
 }
 
 enum MacAudio {

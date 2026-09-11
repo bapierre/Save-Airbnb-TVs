@@ -5,6 +5,8 @@ import TVCastKit
 struct TVCastApp: App {
     @StateObject private var controller = CastController()
 
+    init() { signal(SIGPIPE, SIG_IGN) }  // never die because a TV dropped its connection
+
     var body: some Scene {
         MenuBarExtra("tvcast", systemImage: controller.isCasting ? "tv.fill" : "tv") {
             ContentView(controller: controller)

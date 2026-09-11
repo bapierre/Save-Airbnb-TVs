@@ -5,13 +5,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONF="${1:-release}"
 swift build -c "$CONF" --product TVCastApp
-swift build -c "$CONF" --product sckcap
 BIN=".build/$CONF"
 APP="TVCast.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/TVCastApp" "$APP/Contents/MacOS/TVCast"
-cp "$BIN/sckcap" "$APP/Contents/Resources/sckcap"
 # Bundle ffmpeg if a copy is provided (STATIC recommended); else the app uses system ffmpeg.
 if [ -n "${FFMPEG:-}" ] && [ -x "${FFMPEG:-}" ]; then
   cp "$FFMPEG" "$APP/Contents/Resources/ffmpeg"

@@ -12,10 +12,6 @@ func firstRenderer() -> Renderer? {
     return SSDP.discover(timeout: 4).first
 }
 
-func siblingHelper() -> String {
-    URL(fileURLWithPath: args[0]).deletingLastPathComponent().appendingPathComponent("sckcap").path
-}
-
 func mainDisplaySize() -> (Int, Int) {
     let d = CGMainDisplayID()
     return (CGDisplayPixelsWide(d), CGDisplayPixelsHigh(d))
@@ -36,13 +32,11 @@ case "capture":  // capture <seconds> <outfile.ts> — local validation, no TV
     let secs = args.count > 2 ? Double(args[2]) ?? 4 : 4
     let outfile = args.count > 3 ? args[3] : "capture.ts"
     guard let ffmpeg = locateFFmpeg() else { err("ffmpeg not found"); exit(2) }
-    let helper = siblingHelper()
-    guard FileManager.default.isExecutableFile(atPath: helper) else { err("helper missing at \(helper)"); exit(2) }
     let spec = VideoSpec()
     let (dw, dh) = mainDisplaySize()
     let size = fitSize(displayW: dw, displayH: dh, maxW: spec.width, maxH: spec.height)
     err("capturing \(size.0)x\(size.1) for \(secs)s -> \(outfile)")
-    let src = ScreenCaptureSource(ffmpegPath: ffmpeg, helperPath: helper, spec: spec, captureSize: size)
+    let src = ScreenCaptureSource(ffmpegPath: ffmpeg, spec: spec, captureSize: size)
     do { try src.start() } catch { err("\(error)"); exit(2) }
     var data = Data()
     let deadline = Date().addingTimeInterval(secs)

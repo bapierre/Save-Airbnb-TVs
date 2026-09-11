@@ -73,6 +73,9 @@ public final class StreamServer {
         while accepting {
             let client = accept(fd, nil, nil)
             if client < 0 { break }
+            // A disconnected TV must not raise SIGPIPE and kill the app when we write.
+            var on: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             Thread.detachNewThread { [weak self] in self?.handle(client) }
         }
     }
