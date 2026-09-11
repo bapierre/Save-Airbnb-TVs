@@ -42,7 +42,8 @@ def main(argv=None):
                         "the ScreenCaptureKit helper, else BlackHole, else video only)")
     p.add_argument("--quality", choices=sorted(QUALITY), default="720p")
     p.add_argument("--fps", type=int, default=30)
-    p.add_argument("--bitrate", default="4M")
+    p.add_argument("--bitrate", default="3M",
+                   help="video bitrate, also the burst cap (default 3M; try 2M on busy Wi-Fi)")
     p.add_argument("--port", type=int, default=8090)
     p.add_argument("--timeout", type=float, default=4.0, help="SSDP discovery seconds")
     p.add_argument("--keep-mac-audio", action="store_true",

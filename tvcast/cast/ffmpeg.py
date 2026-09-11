@@ -18,7 +18,7 @@ class VideoSpec:
     width: int = 1280
     height: int = 720
     fps: int = 30
-    bitrate: str = "4M"
+    bitrate: str = "3M"
 
 
 def find_ffmpeg():
@@ -105,9 +105,12 @@ def build_argv(ffmpeg, inputs, spec, has_audio):
     if "pipe:0" not in inputs:
         argv.append("-nostdin")
     argv += inputs
+    # maxrate/bufsize cap the encoder's bursts to the target rate over a 1 s window.
+    # Uncapped, motion spikes to 2-3x the average and stall TVs on busy Wi-Fi.
     argv += ["-vf", fit_filter(spec),
-             "-c:v", "h264_videotoolbox", "-b:v", spec.bitrate, "-g", str(spec.fps),
-             "-bf", "0", "-realtime", "1"]
+             "-c:v", "h264_videotoolbox", "-b:v", spec.bitrate,
+             "-maxrate", spec.bitrate, "-bufsize", spec.bitrate,
+             "-g", str(spec.fps), "-bf", "0", "-realtime", "1"]
     if has_audio:
         argv += ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
     else:

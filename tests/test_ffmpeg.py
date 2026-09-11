@@ -74,6 +74,8 @@ class TestArgv(unittest.TestCase):
         spec = ff.VideoSpec(width=1920, height=1080, fps=25, bitrate="8M")
         argv = ff.build_argv("ffmpeg", ff.avfoundation_inputs(4, None, spec.fps), spec, False)
         self.assertIn("8M", argv)
+        self.assertEqual(argv[argv.index("-maxrate") + 1], "8M")
+        self.assertEqual(argv[argv.index("-bufsize") + 1], "8M")
         self.assertEqual(argv[argv.index("-g") + 1], "25")
         self.assertEqual(argv[argv.index("-framerate") + 1], "25")
 
