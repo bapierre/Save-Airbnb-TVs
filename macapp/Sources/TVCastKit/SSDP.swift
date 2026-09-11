@@ -2,7 +2,7 @@ import Foundation
 
 /// A DLNA MediaRenderer we can cast to: its address, friendly name, and the AVTransport
 /// control URL we POST SOAP commands to.
-public struct Renderer: Equatable, Identifiable, Sendable {
+public struct Renderer: Equatable, Hashable, Identifiable, Sendable {
     public let ip: String
     public let name: String
     public let controlURL: URL
