@@ -16,7 +16,19 @@ $ tvcast
 TV: PLAYING
 ```
 
-Two commands ship in this package:
+## Two ways to use it
+
+- **Menu-bar app** (macOS, in `macapp/`). A native `TVCast.app`, no Python at runtime:
+  pick your TV from the menu bar, press Play, and use Resync, a quality picker
+  (Smooth / Balanced / Sharp), and Stop. Build it with `cd macapp && ./make-app.sh release`;
+  `macapp/README.md` covers building, signing, and notarizing.
+- **Command line** (the rest of this page). `tvprobe` and `tvcast`: scriptable, and the
+  reference where new TV support is prototyped.
+
+Both use the same technique and share the same hard-won behavior. The sections below cover
+the command-line tools.
+
+Two commands ship in the command-line package:
 
 | Command | What it does |
 |---|---|
@@ -186,7 +198,9 @@ what a report must contain; `tvprobe --report` produces the sanitized fingerprin
 - TV web browser fallback: an HLS page you type into the TV's browser
 - DIAL: launch the TV's own YouTube app with a video
 - Linux capture (PipeWire) so the probe and cast both run on Linux
-- A macOS menu-bar app wrapping the same core, with a one-click Resync button and a TV picker
+
+The native macOS menu-bar app is already built (see `macapp/`); notarizing it for
+distribution and bundling a static ffmpeg are the remaining steps there.
 
 ## Contributing
 
