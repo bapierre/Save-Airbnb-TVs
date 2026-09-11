@@ -23,7 +23,7 @@ enum Quality: String, CaseIterable, Identifiable {
 
 @MainActor
 final class CastController: ObservableObject {
-    @Published var quality: Quality = .balanced
+    @Published var quality: Quality = .smooth  // robust by default; a stranger's Wi-Fi is unknown
     @Published var renderers: [Renderer] = []
     @Published var selected: Renderer?
     @Published var status = "Idle"
