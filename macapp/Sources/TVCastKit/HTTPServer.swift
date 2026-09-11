@@ -22,7 +22,7 @@ public final class StreamServer {
 
     static let dlnaHeaders = [
         "transferMode.dlna.org": "Streaming",
-        "contentFeatures.dlna.org": "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
+        "contentFeatures.dlna.org": "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=8D500000000000000000000000000000",
         "Accept-Ranges": "none",
     ]
 

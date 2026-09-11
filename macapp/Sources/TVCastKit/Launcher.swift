@@ -123,6 +123,9 @@ public struct DlnaLauncher {
          .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
+    // DLNA.ORG_FLAGS 0x8D500000 = sender-paced + s0/sN increasing (live, growing, no fixed
+    // end) + streaming + dlna1.5. Tells the TV this is a live source so it drops the
+    // finite-file progress/buffer overlay (the stuck "NN%" indicator).
     static func didlLite(url: String, title: String, mime: String = "video/mpeg") -> String {
         """
         <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" \
@@ -132,7 +135,7 @@ public struct DlnaLauncher {
         <item id="0" parentID="-1" restricted="1"><dc:title>\(escape(title))</dc:title>\
         <upnp:class>object.item.videoItem</upnp:class>\
         <res protocolInfo="http-get:*:\(mime):DLNA.ORG_OP=00;DLNA.ORG_CI=0;\
-        DLNA.ORG_FLAGS=01700000000000000000000000000000">\
+        DLNA.ORG_FLAGS=8D500000000000000000000000000000">\
         \(escape(url))</res></item></DIDL-Lite>
         """
     }
