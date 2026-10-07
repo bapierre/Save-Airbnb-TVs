@@ -100,6 +100,7 @@ public final class Session {
     /// Returns 0 on clean stop, 1 on give-up.
     @discardableResult
     public func run() -> Int {
+        if shouldStop() { onServerStop(); return 0 }
         var watcher = Watcher()
         if !play() { onServerStop(); return 1 }
         var code = 0

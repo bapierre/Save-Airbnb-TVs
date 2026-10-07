@@ -40,7 +40,11 @@ final class CastController: ObservableObject {
         // Never leave the Mac muted if the app quits mid-cast.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                object: nil, queue: .main) { [weak self] _ in
-            if self?.didMute == true { MacAudio.setMuted(false) }
+            MainActor.assumeIsolated {
+                self?.stopFlag.set(true)
+                self?.server?.stop()
+                if self?.didMute == true { MacAudio.setMuted(false) }
+            }
         }
     }
 
@@ -94,9 +98,11 @@ final class CastController: ObservableObject {
 
         Task.detached { [weak self] in
             guard let self else { return }
+            guard !self.stopFlag.get() else { await self.finish(status: "Stopped"); return }
             let port: UInt16
             do { port = try server.start(port: 0) }
             catch { await self.finish(status: "cannot open a local port"); return }
+            guard !self.stopFlag.get() else { await self.finish(status: "Stopped"); return }
             let url = "http://\(myIP):\(port)\(server.path)"
             await MainActor.run { self.status = "Casting to \(target.name)" }
 
@@ -127,9 +133,11 @@ final class CastController: ObservableObject {
         guard isCasting else { return }
         status = "Stopping…"
         stopFlag.set(true)
+        server?.stop()
     }
 
     private func finish(status: String) {
+        server?.stop()
         self.status = status
         self.isCasting = false
         self.server = nil

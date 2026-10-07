@@ -84,9 +84,11 @@ public final class ScreenCaptureSource: NSObject, MediaSource, SCStreamOutput, S
     private let withAudio: Bool
 
     private var stream: SCStream?
+    private let lifecycleLock = NSLock()
+    private var captureStopped = false
     private var ffmpeg: Process?
     private var videoIn: FileHandle?      // ffmpeg stdin (raw NV12)
-    private var tsOut: FileHandle?        // ffmpeg stdout (MPEG-TS)
+    private let output = CapturePipeReader() // ffmpeg stdout (MPEG-TS)
     private var audioFifoHandle: FileHandle?
     private var tmpDir: URL?
     private let store: FrameStore
@@ -130,7 +132,8 @@ public final class ScreenCaptureSource: NSObject, MediaSource, SCStreamOutput, S
         do { try ff.run() } catch { throw CaptureError.launchFailed(error.localizedDescription) }
         ffmpeg = ff
         videoIn = stdinPipe.fileHandleForWriting
-        tsOut = stdoutPipe.fileHandleForReading
+        try output.open(stdoutPipe.fileHandleForReading)
+        try stdoutPipe.fileHandleForReading.close()
 
         // Opening a fifo for writing blocks until ffmpeg opens the read end; do it off-thread.
         if let fifo = fifoPath {
@@ -171,7 +174,11 @@ public final class ScreenCaptureSource: NSObject, MediaSource, SCStreamOutput, S
                     try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "tvcast.audio"))
                 }
                 try await s.startCapture()
-                self.stream = s
+                let stopped = self.lifecycleLock.withLock {
+                    if !self.captureStopped { self.stream = s }
+                    return self.captureStopped
+                }
+                if stopped { try? await s.stopCapture() }
             } catch {
                 startError = error
             }
@@ -265,20 +272,25 @@ public final class ScreenCaptureSource: NSObject, MediaSource, SCStreamOutput, S
     // MARK: MediaSource
 
     public func read(_ maxBytes: Int) -> Data {
-        tsOut?.availableData ?? Data()
+        output.read(maxBytes)
     }
 
     public func stop() {
+        output.close()
+        let activeStream = lifecycleLock.withLock {
+            captureStopped = true
+            let active = stream
+            stream = nil
+            return active
+        }
         timer?.cancel(); timer = nil
-        if let s = stream {
+        if let s = activeStream {
             let sem = DispatchSemaphore(value: 0)
             Task { try? await s.stopCapture(); sem.signal() }
             _ = sem.wait(timeout: .now() + 3)
-            stream = nil
         }
         ffmpeg?.terminate(); ffmpeg = nil
         try? videoIn?.close(); videoIn = nil
-        try? tsOut?.close(); tsOut = nil
         audioLock.lock(); try? audioFifoHandle?.close(); audioFifoHandle = nil; audioLock.unlock()
         if let dir = tmpDir { try? FileManager.default.removeItem(at: dir); tmpDir = nil }
     }

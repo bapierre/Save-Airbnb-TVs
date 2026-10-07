@@ -1,7 +1,8 @@
 import Foundation
 
 /// A live byte source for one HTTP client: `read` blocks until data is ready or the stream
-/// ends (returns empty), `stop` tears down the underlying capture.
+/// ends (returns empty), `stop` tears down the underlying capture. The server may call
+/// `stop` concurrently with `read`; implementations must release a blocked read safely.
 public protocol MediaSource: AnyObject {
     func read(_ maxBytes: Int) -> Data
     func stop()
@@ -16,8 +17,11 @@ public final class StreamServer {
 
     private let makeSource: () -> MediaSource
     private let log: (String) -> Void
+    private let stateLock = NSLock()
+    private var clients = Set<Int32>()
+    private var sources: [Int32: MediaSource] = [:]
     private var listenFD: Int32 = -1
-    private var accepting = false
+    private var stopped = false
     private let chunk = 188 * 64
 
     static let dlnaHeaders = [
@@ -56,32 +60,57 @@ public final class StreamServer {
         withUnsafeMutablePointer(to: &actual) { ptr in
             ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { _ = getsockname(fd, $0, &len) }
         }
+        stateLock.lock()
+        guard !stopped else { stateLock.unlock(); close(fd); throw ServerError.stopped }
+        guard listenFD < 0 else { stateLock.unlock(); close(fd); throw ServerError.alreadyStarted }
         port = UInt16(bigEndian: actual.sin_port)
         listenFD = fd
-        accepting = true
+        stateLock.unlock()
 
-        Thread.detachNewThread { [weak self] in self?.acceptLoop(fd) }
+        Thread.detachNewThread { self.acceptLoop(fd) }
         return port
     }
 
+    /// Stop is terminal; create a new server for the next cast. Factories already
+    /// in progress are disposed as soon as they return, without streaming their result.
     public func stop() {
-        accepting = false
-        if listenFD >= 0 { close(listenFD); listenFD = -1 }
+        stateLock.lock()
+        stopped = true
+        // The accept thread owns close(), so its fd cannot be reused under accept().
+        if listenFD >= 0 { Darwin.shutdown(listenFD, SHUT_RDWR) }
+        for client in clients { Darwin.shutdown(client, SHUT_RDWR) }
+        let active = Array(sources.values)
+        sources.removeAll()
+        stateLock.unlock()
+        for source in active { source.stop() }
     }
 
     private func acceptLoop(_ fd: Int32) {
-        while accepting {
+        defer {
+            stateLock.lock()
+            close(fd)
+            listenFD = -1
+            stateLock.unlock()
+        }
+        while stateLock.withLock({ !stopped }) {
             let client = accept(fd, nil, nil)
-            if client < 0 { break }
+            if client < 0 {
+                if errno == EINTR { continue }
+                break
+            }
             // A disconnected TV must not raise SIGPIPE and kill the app when we write.
             var on: Int32 = 1
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-            Thread.detachNewThread { [weak self] in self?.handle(client) }
+            stateLock.lock()
+            guard !stopped else { stateLock.unlock(); close(client); break }
+            clients.insert(client)
+            stateLock.unlock()
+            Thread.detachNewThread { self.handle(client) }
         }
     }
 
     private func handle(_ client: Int32) {
-        defer { close(client) }
+        defer { finish(client) }
         guard let request = readRequestLine(client) else { return }
         let (method, target) = request
         let wantsStream = target.split(separator: "?").first.map(String.init) == path
@@ -97,7 +126,14 @@ public final class StreamServer {
         send(client, head)
         if method == "HEAD" { return }
 
+        guard stateLock.withLock({ !stopped }) else { return }
+        // A factory may wait for screen-recording permission. Do not hold the lock
+        // while it runs: Stop must still close the listener and other clients.
         let source = makeSource()
+        stateLock.lock()
+        guard !stopped else { stateLock.unlock(); source.stop(); return }
+        sources[client] = source
+        stateLock.unlock()
         var sent = 0
         while true {
             let data = source.read(chunk)
@@ -105,8 +141,18 @@ public final class StreamServer {
             if !sendData(client, data) { break }
             sent += data.count
         }
-        source.stop()
         log("client disconnected after \(sent) bytes")
+    }
+
+    private func finish(_ client: Int32) {
+        stateLock.lock()
+        let source = sources.removeValue(forKey: client)
+        stateLock.unlock()
+        source?.stop()
+        stateLock.lock()
+        clients.remove(client)
+        close(client)
+        stateLock.unlock()
     }
 
     private func readRequestLine(_ client: Int32) -> (String, String)? {
@@ -145,5 +191,5 @@ public final class StreamServer {
         return ok
     }
 
-    public enum ServerError: Error { case socket, bind }
+    public enum ServerError: Error { case socket, bind, stopped, alreadyStarted }
 }
