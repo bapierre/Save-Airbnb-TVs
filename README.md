@@ -185,6 +185,7 @@ tvprobe --no-wifi              # skip the Wi-Fi Direct scan (slow on macOS)
 | TV | Platform | Transport | Result |
 |---|---|---|---|
 | "Weier" no-name set, HiSilicon Hi3751V350 | Android 9, stagefright player | DLNA | Works with sound. About 2 s latency. Only speaks DLNA (no ADB, Cast or DIAL). Its player gives up if the first byte takes more than a second or two. |
+| Samsung AU7700 43" (UA43AU7700KXXT, 2021) | Tizen | DLNA | Works with sound, stock `tvcast`, no popup. About 3 to 5 s latency. Also advertises AirPlay (untested). See `hacks/samsung-au7700/`. |
 
 Add yours: open a [TV report](https://github.com/bapierre/Save-Airbnb-TVs/issues/new?template=tv_report.yml)
 or send a pull request with a `hacks/<brand>-<model>/` folder. `CONTRIBUTING.md` explains

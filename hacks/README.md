@@ -8,6 +8,7 @@ to a supported transport in `tvcast`.
 | Folder | TV | Transport | Status |
 |---|---|---|---|
 | `weier-hi3751-android9` | "Weier" no-name set, HiSilicon Hi3751V350, Android 9 | DLNA | Promoted: this is the `tvcast` default path |
+| `samsung-au7700` | Samsung AU7700 43" (UA43AU7700KXXT), Tizen | DLNA (stock `tvcast`) | Reported |
 
 Status values: **reported** (one person), **confirmed** (reproduced by someone else),
 **promoted** (built into `tvcast`).
